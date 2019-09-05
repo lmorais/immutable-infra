@@ -1,0 +1,45 @@
+pipeline {
+  agent {
+    docker {
+      image 'goforgold/build-container:latest'
+    }
+  }
+  stages {
+    stage('Build') {
+      steps {
+        sh 'npm install'
+      }
+    }
+    stage('Create AMI') {
+        steps {
+          withCredentials([
+            usernamePassword(credentialsId: '73d7a33a-dfac-421c-895e-049317f5e157', passwordVariable: 'AWS_SECRET', usernameVariable: 'AWS_KEY')
+          ]) {
+            sh 'packer build -var aws_access_key=${AWS_KEY} -var aws_secret_key=${AWS_SECRET} node-app/packer/packer.json'
+        }
+      }
+    }
+    stage('Deploy to AWS') {
+      steps {
+          withCredentials([
+            usernamePassword(credentialsId: '73d7a33a-dfac-421c-895e-049317f5e157', passwordVariable: 'AWS_SECRET', usernameVariable: 'AWS_KEY'),
+            usernamePassword(credentialsId: '375f867c-4565-498d-bf2e-50ddc604b29b', passwordVariable: 'REPO_PASS', usernameVariable: 'REPO_USER'),
+          ]) {
+            sh 'rm -rf node-app-terraform'
+            sh 'git clone https://github.com/lmorais/immutable-infra.git'
+            sh '''
+               cd node-app-terraform
+               terraform init
+               terraform apply -auto-approve -var access_key=${AWS_KEY} -var secret_key=${AWS_SECRET}
+               git add terraform.tfstate
+               git -c user.name="Leo Morais" -c user.email="leonel.morais@rivendel.com.br" commit -m "terraform state update from Jenkins"
+               git push https://${REPO_USER}:${REPO_PASS}@github.com/lmorais/immutable-infra.git master
+            '''
+        }
+      }
+    }
+  }
+  environment {
+    npm_config_cache = 'npm-cache'
+  }
+}
